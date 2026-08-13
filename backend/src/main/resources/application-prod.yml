@@ -1,0 +1,17 @@
+spring:
+  sql:
+    init:
+      mode: never
+  datasource:
+    url: jdbc:sqlite:${SQLITE_PATH:./data/ai-mms.db}
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+logging:
+  level:
+    root: info
+    com.aimms: info
+  file:
+    name: ./logs/app.log
