@@ -36,13 +36,23 @@ apt-get update -qq
 apt-get install -y -qq curl wget git unzip tar build-essential > /dev/null 2>&1
 
 echo -e "${YELLOW}[2/8] 安装 JDK ${JAVA_VERSION}...${NC}"
-if ! command -v java &> /dev/null; then
-    apt-get install -y -qq openjdk-${JAVA_VERSION}-jdk-headless > /dev/null 2>&1
+# 检查默认仓库是否有 OpenJDK 21 (Ubuntu 24.04 有, 22.04 没有)
+if ! apt-cache show openjdk-${JAVA_VERSION}-jdk-headless > /dev/null 2>&1; then
+    echo -e "${YELLOW}  默认仓库无 OpenJDK ${JAVA_VERSION}, 添加 Adoptium 源...${NC}"
+    apt-get install -y -qq wget apt-transport-https gnupg > /dev/null 2>&1
+    wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /usr/share/keyrings/adoptium.gpg 2>/dev/null
+    echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(. /etc/os-release && echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/adoptium.list
+    apt-get update -qq
+    apt-get install -y -qq temurin-${JAVA_VERSION}-jdk > /dev/null 2>&1
+else
+    if ! command -v java &> /dev/null || [ "$(java -version 2>&1 | head -1 | awk -F '"' '{print $2}' | cut -d'.' -f1)" != "$JAVA_VERSION" ]; then
+        apt-get install -y -qq openjdk-${JAVA_VERSION}-jdk-headless > /dev/null 2>&1
+    fi
 fi
-JAVA_INSTALLED=$(java -version 2>&1 | head -1 | awk -F '"' '{print $2}' | cut -d'.' -f1)
-if [ "$JAVA_INSTALLED" != "$JAVA_VERSION" ] && [ "$JAVA_INSTALLED" != "$((JAVA_VERSION-1))" ]; then
-    echo -e "${YELLOW}当前 Java 版本: ${JAVA_INSTALLED}, 安装 OpenJDK ${JAVA_VERSION}...${NC}"
-    apt-get install -y -qq openjdk-${JAVA_VERSION}-jdk-headless > /dev/null 2>&1
+# 验证 Java 安装
+if ! command -v java &> /dev/null; then
+    echo -e "${RED}  JDK ${JAVA_VERSION} 安装失败!${NC}"
+    exit 1
 fi
 echo -e "${GREEN}  Java: $(java -version 2>&1 | head -1)${NC}"
 
@@ -89,6 +99,7 @@ if [ -d "$SCRIPT_DIR/frontend" ]; then
     cp "$SCRIPT_DIR/frontend/tsconfig.json" "$INSTALL_DIR/frontend/"
     cp "$SCRIPT_DIR/frontend/tsconfig.node.json" "$INSTALL_DIR/frontend/"
     cp "$SCRIPT_DIR/frontend/vite.config.ts" "$INSTALL_DIR/frontend/"
+    cp "$SCRIPT_DIR/frontend/package-lock.json" "$INSTALL_DIR/frontend/" 2>/dev/null || true
     echo -e "${GREEN}  前端源码已复制${NC}"
 else
     echo -e "${RED}  错误: 未找到 frontend 目录!${NC}"
@@ -99,14 +110,14 @@ chown -R "$APP_USER":"$APP_USER" "$INSTALL_DIR"
 
 echo -e "${YELLOW}[7/8] 构建后端 JAR...${NC}"
 cd "$INSTALL_DIR/backend"
-# 安装 Maven
+# 安装 Maven (apt 仓库的 Maven 3.6.3+ 满足 Spring Boot 3.5 要求)
 if ! command -v mvn &> /dev/null; then
     echo "  安装 Maven..."
-    MAVEN_VERSION=3.9.9
-    wget -q "https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -O /tmp/maven.tar.gz
-    tar -xzf /tmp/maven.tar.gz -C /opt/
-    ln -sf /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
-    rm -f /tmp/maven.tar.gz
+    apt-get install -y -qq maven > /dev/null 2>&1
+fi
+if ! command -v mvn &> /dev/null; then
+    echo -e "${RED}  Maven 安装失败!${NC}"
+    exit 1
 fi
 echo -e "${GREEN}  Maven: $(mvn -v 2>&1 | head -1)${NC}"
 
@@ -186,7 +197,7 @@ Type=simple
 User=aimms
 Group=aimms
 WorkingDirectory=/opt/ai-mms/backend
-ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/ai-mms/backend/target/ai-mms-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --SQLITE_PATH=/opt/ai-mms/data/ai-mms.db
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/ai-mms/backend/target/ai-mms-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --SQLITE_PATH=/opt/ai-mms/data/ai-mms.db --spring.sql.init.mode=always
 ExecStop=/bin/kill -TERM $MAINPID
 Restart=on-failure
 RestartSec=10
@@ -207,12 +218,13 @@ echo -e "${GREEN}  ai-mms 服务已启动${NC}"
 #==============================================================
 echo -e "${YELLOW}等待后端启动...${NC}"
 for i in $(seq 1 30); do
-    if curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/dashboard/admin?period=2026-08 | grep -q "200"; then
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080/api/v1/dashboard/admin?period=2026-08" | grep -q "200"; then
         echo -e "${GREEN}  后端已就绪!${NC}"
         break
     fi
     if [ $i -eq 30 ]; then
         echo -e "${RED}  后端启动超时, 请检查日志: tail -f /opt/ai-mms/logs/app.log${NC}"
+        exit 1
     fi
     sleep 1
 done
