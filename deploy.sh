@@ -220,7 +220,9 @@ if [ ! -d "$INSTALL_DIR/frontend/dist" ]; then
     echo -e "${RED}  前端构建失败! dist 目录不存在${NC}"
     echo "$FRONTEND_BUILD" | tail -20
     exit 1
-fichown -R "$APP_USER":"$APP_USER" "$INSTALL_DIR/frontend"echo -e "${GREEN}  前端 dist/ 已生成${NC}"
+fi
+chown -R "$APP_USER":"$APP_USER" "$INSTALL_DIR/frontend"
+echo -e "${GREEN}  前端 dist/ 已生成${NC}"
 
 #==============================================================
 # 配置 Nginx
