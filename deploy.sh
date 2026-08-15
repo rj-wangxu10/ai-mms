@@ -268,35 +268,23 @@ systemctl enable nginx > /dev/null 2>&1
 echo -e "${GREEN}  Nginx 配置完成${NC}"
 
 #==============================================================
-# 配置 Systemd 服务
+# 启动后端 (nohup 后台运行)
 #==============================================================
-echo -e "${CYAN}--- 配置 Systemd 服务 ---${NC}"
-cat > /etc/systemd/system/ai-mms.service << SYSTEMD_EOF
-[Unit]
-Description=AI 费用管理平台后端服务
-After=network.target
+echo -e "${CYAN}--- 启动后端服务 ---${NC}"
+# 停止旧进程
+pkill -f "ai-mms-0.0.1-SNAPSHOT.jar" 2>/dev/null || true
+sleep 1
 
-[Service]
-Type=simple
-User=aimms
-Group=aimms
-WorkingDirectory=/opt/ai-mms/backend
-Environment=JAVA_HOME=${JAVA_HOME}
-ExecStart=${JAVA_HOME}/bin/java -Xms256m -Xmx512m -jar /opt/ai-mms/backend/target/ai-mms-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --SQLITE_PATH=/opt/ai-mms/data/ai-mms.db --spring.sql.init.mode=always
-ExecStop=/bin/kill -TERM \$MAINPID
-Restart=on-failure
-RestartSec=10
-StandardOutput=append:/opt/ai-mms/logs/app.log
-StandardError=append:/opt/ai-mms/logs/error.log
+# 用 nohup 启动, 日志输出到 /opt/ai-mms/logs/
+mkdir -p /opt/ai-mms/logs
+nohup ${JAVA_HOME}/bin/java -Xms256m -Xmx512m \
+    -jar /opt/ai-mms/backend/target/ai-mms-0.0.1-SNAPSHOT.jar \
+    --spring.profiles.active=prod \
+    --SQLITE_PATH=/opt/ai-mms/data/ai-mms.db \
+    --spring.sql.init.mode=always \
+    > /opt/ai-mms/logs/app.log 2>&1 &
 
-[Install]
-WantedBy=multi-user.target
-SYSTEMD_EOF
-
-systemctl daemon-reload
-systemctl enable ai-mms > /dev/null 2>&1
-systemctl restart ai-mms
-echo -e "${GREEN}  ai-mms 服务已启动${NC}"
+echo -e "${GREEN}  后端进程已启动 (PID: $!)${NC}"
 
 #==============================================================
 # 等待后端启动
@@ -329,9 +317,8 @@ echo -e "  Web端口:   ${WEB_PORT}"
 echo ""
 echo -e "  ${YELLOW}常用命令:${NC}"
 echo -e "    查看后端状态:  systemctl status ai-mms"
-echo -e "    重启后端:      systemctl restart ai-mms"
-echo -e "    查看后端日志:  journalctl -u ai-mms -f"
-echo -e "    查看应用日志:  tail -f /opt/ai-mms/logs/app.log"
+echo -e "    查看后端日志:  tail -f /opt/ai-mms/logs/app.log"
+echo -e "    重启后端:      pkill -f ai-mms-0.0.1-SNAPSHOT.jar; nohup /usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar /opt/ai-mms/backend/target/ai-mms-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --SQLITE_PATH=/opt/ai-mms/data/ai-mms.db --spring.sql.init.mode=always > /opt/ai-mms/logs/app.log 2>&1 &"
 echo -e "    重启 Nginx:    systemctl restart nginx"
 echo -e "    查看 Nginx日志: tail -f /var/log/nginx/access.log"
 echo ""
