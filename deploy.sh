@@ -54,7 +54,11 @@ if ! command -v java &> /dev/null; then
     echo -e "${RED}  JDK ${JAVA_VERSION} 安装失败!${NC}"
     exit 1
 fi
+# 设置 JAVA_HOME (su - 切换用户后不会继承 root 的环境变量)
+JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
+export JAVA_HOME
 echo -e "${GREEN}  Java: $(java -version 2>&1 | head -1)${NC}"
+echo -e "${GREEN}  JAVA_HOME: ${JAVA_HOME}${NC}"
 
 echo -e "${YELLOW}[3/8] 安装 Node.js ${NODE_VERSION}...${NC}"
 if ! command -v node &> /dev/null; then
@@ -121,21 +125,39 @@ if ! command -v mvn &> /dev/null; then
 fi
 echo -e "${GREEN}  Maven: $(mvn -v 2>&1 | head -1)${NC}"
 
-# 构建
-su - "$APP_USER" -c "cd $INSTALL_DIR/backend && mvn clean package -DskipTests -q" 2>&1 | tail -5
+# 构建 (传递 JAVA_HOME 和 PATH 给 aimms 用户)
+BUILD_OUTPUT=$(su - "$APP_USER" -c "export JAVA_HOME=$JAVA_HOME && export PATH=\$JAVA_HOME/bin:\$PATH && cd $INSTALL_DIR/backend && mvn clean package -DskipTests" 2>&1)
+BUILD_EXIT_CODE=$?
+if [ $BUILD_EXIT_CODE -ne 0 ]; then
+    echo -e "${RED}  后端构建失败! 错误输出:${NC}"
+    echo "$BUILD_OUTPUT" | tail -30
+    exit 1
+fi
 JAR_FILE=$(ls "$INSTALL_DIR/backend/target/ai-mms-*.jar" 2>/dev/null | head -1)
 if [ -z "$JAR_FILE" ]; then
-    echo -e "${RED}  后端构建失败!${NC}"
+    echo -e "${RED}  后端构建失败! 未找到 JAR 文件${NC}"
+    echo "$BUILD_OUTPUT" | tail -30
     exit 1
 fi
 echo -e "${GREEN}  JAR: $(basename $JAR_FILE)${NC}"
 
 echo -e "${YELLOW}[8/8] 构建前端...${NC}"
 cd "$INSTALL_DIR/frontend"
-su - "$APP_USER" -c "cd $INSTALL_DIR/frontend && npm install --silent 2>&1" | tail -3
-su - "$APP_USER" -c "cd $INSTALL_DIR/frontend && npx vite build 2>&1" | tail -5
-if [ ! -d "$INSTALL_DIR/frontend/dist" ]; then
+FRONTEND_INSTALL=$(su - "$APP_USER" -c "export JAVA_HOME=$JAVA_HOME && export PATH=$JAVA_HOME/bin:\$PATH && cd $INSTALL_DIR/frontend && npm install 2>&1")
+if [ $? -ne 0 ]; then
+    echo -e "${RED}  前端依赖安装失败!${NC}"
+    echo "$FRONTEND_INSTALL" | tail -20
+    exit 1
+fi
+FRONTEND_BUILD=$(su - "$APP_USER" -c "export JAVA_HOME=$JAVA_HOME && export PATH=$JAVA_HOME/bin:\$PATH && cd $INSTALL_DIR/frontend && npx vite build 2>&1")
+if [ $? -ne 0 ]; then
     echo -e "${RED}  前端构建失败!${NC}"
+    echo "$FRONTEND_BUILD" | tail -20
+    exit 1
+fi
+if [ ! -d "$INSTALL_DIR/frontend/dist" ]; then
+    echo -e "${RED}  前端构建失败! dist 目录不存在${NC}"
+    echo "$FRONTEND_BUILD" | tail -20
     exit 1
 fi
 echo -e "${GREEN}  前端 dist/ 已生成${NC}"
@@ -187,7 +209,7 @@ echo -e "${GREEN}  Nginx 配置完成${NC}"
 # 配置 Systemd 服务
 #==============================================================
 echo -e "${CYAN}--- 配置 Systemd 服务 ---${NC}"
-cat > /etc/systemd/system/ai-mms.service << 'SYSTEMD_EOF'
+cat > /etc/systemd/system/ai-mms.service << SYSTEMD_EOF
 [Unit]
 Description=AI 费用管理平台后端服务
 After=network.target
@@ -197,8 +219,9 @@ Type=simple
 User=aimms
 Group=aimms
 WorkingDirectory=/opt/ai-mms/backend
-ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/ai-mms/backend/target/ai-mms-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --SQLITE_PATH=/opt/ai-mms/data/ai-mms.db --spring.sql.init.mode=always
-ExecStop=/bin/kill -TERM $MAINPID
+Environment=JAVA_HOME=${JAVA_HOME}
+ExecStart=${JAVA_HOME}/bin/java -Xms256m -Xmx512m -jar /opt/ai-mms/backend/target/ai-mms-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --SQLITE_PATH=/opt/ai-mms/data/ai-mms.db --spring.sql.init.mode=always
+ExecStop=/bin/kill -TERM \$MAINPID
 Restart=on-failure
 RestartSec=10
 StandardOutput=append:/opt/ai-mms/logs/app.log
