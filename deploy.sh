@@ -35,19 +35,19 @@ echo -e "${YELLOW}[1/8] 安装系统依赖...${NC}"
 apt-get update -qq
 apt-get install -y -qq curl wget git unzip tar build-essential > /dev/null 2>&1
 
-echo -e "${YELLOW}[2/8] 安装 JDK ${JAVA_VERSION}...${NC}"
+echo -e "${YELLOW}[2/8] 安装 JDK ${JAVA_VERSION} (完整 JDK, 含 javac)...${NC}"
 # 检查默认仓库是否有 OpenJDK 21 (Ubuntu 24.04 有, 22.04 没有)
-if ! apt-cache show openjdk-${JAVA_VERSION}-jdk-headless > /dev/null 2>&1; then
+# 注意: 必须安装 openjdk-XX-jdk (不是 -headless), headless 不含 javac
+if ! apt-cache show openjdk-${JAVA_VERSION}-jdk > /dev/null 2>&1; then
     echo -e "${YELLOW}  默认仓库无 OpenJDK ${JAVA_VERSION}, 添加 Adoptium 源...${NC}"
     apt-get install -y -qq wget apt-transport-https gnupg > /dev/null 2>&1
     wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /usr/share/keyrings/adoptium.gpg 2>/dev/null
     echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(. /etc/os-release && echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/adoptium.list
     apt-get update -qq
-    apt-get install -y -qq temurin-${JAVA_VERSION}-jdk > /dev/null 2>&1
+    apt-get install -y temurin-${JAVA_VERSION}-jdk
 else
-    if ! command -v java &> /dev/null || [ "$(java -version 2>&1 | head -1 | awk -F '"' '{print $2}' | cut -d'.' -f1)" != "$JAVA_VERSION" ]; then
-        apt-get install -y -qq openjdk-${JAVA_VERSION}-jdk-headless > /dev/null 2>&1
-    fi
+    # 安装完整 JDK (含 javac), 不用 headless
+    apt-get install -y openjdk-${JAVA_VERSION}-jdk
 fi
 # 验证 Java 安装
 if ! command -v java &> /dev/null; then
@@ -73,6 +73,19 @@ if [ -z "$JAVA_21_HOME" ]; then
     exit 1
 fi
 
+# 验证 javac 存在 (headless JDK 没有 javac)
+if [ ! -x "$JAVA_21_HOME/bin/javac" ]; then
+    echo -e "${RED}  $JAVA_21_HOME/bin/javac 不存在! 可能安装了 headless JRE 而非完整 JDK${NC}"
+    echo -e "${YELLOW}  尝试安装完整 JDK...${NC}"
+    apt-get install -y openjdk-${JAVA_VERSION}-jdk
+    if [ ! -x "$JAVA_21_HOME/bin/javac" ]; then
+        echo -e "${RED}  javac 仍不存在! 已安装的 JVM:${NC}"
+        ls -la /usr/lib/jvm/ 2>/dev/null
+        ls -la "$JAVA_21_HOME/bin/" 2>/dev/null
+        exit 1
+    fi
+fi
+
 # 设置 JAVA_HOME 并切换 update-alternatives
 JAVA_HOME="$JAVA_21_HOME"
 export JAVA_HOME
@@ -83,6 +96,7 @@ update-alternatives --set javac "$JAVA_HOME/bin/javac" 2>/dev/null || true
 
 echo -e "${GREEN}  Java: $(java -version 2>&1 | head -1)${NC}"
 echo -e "${GREEN}  JAVA_HOME: ${JAVA_HOME}${NC}"
+echo -e "${GREEN}  javac: $(javac -version 2>&1)${NC}"
 echo -e "${GREEN}  javac: $(javac -version 2>&1)${NC}"
 
 echo -e "${YELLOW}[3/8] 安装 Node.js ${NODE_VERSION}...${NC}"
