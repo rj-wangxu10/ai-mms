@@ -150,11 +150,22 @@ if ! command -v mvn &> /dev/null; then
 fi
 echo -e "${GREEN}  Maven: $(mvn -v 2>&1 | head -1)${NC}"
 echo -e "${YELLOW}  mvn -v 完整输出:${NC}"
-mvn -v 2>&1
+JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" mvn -v 2>&1
 
-# 构建 (以 root 身份构建, 显式传递 JAVA_HOME)
+# 修复 /etc/maven.conf (Ubuntu 的 mvn 脚本会 source 此文件, 可能覆盖 JAVA_HOME)
+if [ -f /etc/maven.conf ]; then
+    echo -e "${YELLOW}  修复 /etc/maven.conf 中的 JAVA_HOME...${NC}"
+    sed -i "s|^JAVA_HOME=.*|JAVA_HOME=$JAVA_HOME|" /etc/maven.conf 2>/dev/null || true
+    grep JAVA_HOME /etc/maven.conf 2>/dev/null || echo "JAVA_HOME=$JAVA_HOME" >> /etc/maven.conf
+fi
+# 同样修复 /etc/default/maven
+if [ -f /etc/default/maven ]; then
+    sed -i "s|^JAVA_HOME=.*|JAVA_HOME=$JAVA_HOME|" /etc/default/maven 2>/dev/null || true
+fi
+
+# 构建 (以 root 身份构建, 强制 fork javac 使用 JDK 21)
 set +e
-BUILD_OUTPUT=$(cd "$INSTALL_DIR/backend" && JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" mvn clean package -DskipTests 2>&1)
+BUILD_OUTPUT=$(cd "$INSTALL_DIR/backend" && JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" mvn clean package -DskipTests -Dmaven.compiler.fork=true -Dmaven.compiler.executable="$JAVA_HOME/bin/javac" 2>&1)
 BUILD_EXIT_CODE=$?
 set -e
 if [ $BUILD_EXIT_CODE -ne 0 ]; then
