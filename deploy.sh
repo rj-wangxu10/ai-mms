@@ -124,10 +124,12 @@ if ! command -v mvn &> /dev/null; then
     exit 1
 fi
 echo -e "${GREEN}  Maven: $(mvn -v 2>&1 | head -1)${NC}"
+echo -e "${YELLOW}  mvn -v 完整输出:${NC}"
+mvn -v 2>&1
 
-# 构建 (以 root 身份构建, 避免 su - 切换用户后 JAVA_HOME 被覆盖)
+# 构建 (以 root 身份构建, 显式传递 JAVA_HOME)
 set +e
-BUILD_OUTPUT=$(cd "$INSTALL_DIR/backend" && mvn clean package -DskipTests 2>&1)
+BUILD_OUTPUT=$(cd "$INSTALL_DIR/backend" && JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" mvn clean package -DskipTests 2>&1)
 BUILD_EXIT_CODE=$?
 set -e
 if [ $BUILD_EXIT_CODE -ne 0 ]; then
