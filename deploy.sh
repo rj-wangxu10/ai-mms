@@ -187,7 +187,7 @@ if [ $BUILD_EXIT_CODE -ne 0 ]; then
     echo "$BUILD_OUTPUT" | tail -50
     exit 1
 fi
-JAR_FILE=$(ls "$INSTALL_DIR/backend/target/ai-mms-*.jar" 2>/dev/null | head -1)
+JAR_FILE=$(ls "$INSTALL_DIR"/backend/target/ai-mms-*.jar 2>/dev/null | head -1)
 if [ -z "$JAR_FILE" ]; then
     echo -e "${RED}  后端构建失败! 未找到 JAR 文件${NC}"
     echo "$BUILD_OUTPUT" | tail -50
