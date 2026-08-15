@@ -125,17 +125,14 @@ if ! command -v mvn &> /dev/null; then
 fi
 echo -e "${GREEN}  Maven: $(mvn -v 2>&1 | head -1)${NC}"
 
-# 构建 (传递 JAVA_HOME 和 PATH 给 aimms 用户)
-# 注意: set -e 会在命令替换失败时直接退出, 跳过错误处理, 所以临时关闭
+# 构建 (以 root 身份构建, 避免 su - 切换用户后 JAVA_HOME 被覆盖)
 set +e
-BUILD_OUTPUT=$(su - "$APP_USER" -c "export JAVA_HOME=$JAVA_HOME && export PATH=\$JAVA_HOME/bin:\$PATH && cd $INSTALL_DIR/backend && mvn clean package -DskipTests" 2>&1)
+BUILD_OUTPUT=$(cd "$INSTALL_DIR/backend" && mvn clean package -DskipTests 2>&1)
 BUILD_EXIT_CODE=$?
 set -e
 if [ $BUILD_EXIT_CODE -ne 0 ]; then
     echo -e "${RED}  后端构建失败! 错误输出 (最后50行):${NC}"
     echo "$BUILD_OUTPUT" | tail -50
-    echo -e "${YELLOW}  --- 完整 Maven 输出 ---${NC}"
-    echo "$BUILD_OUTPUT"
     exit 1
 fi
 JAR_FILE=$(ls "$INSTALL_DIR/backend/target/ai-mms-*.jar" 2>/dev/null | head -1)
@@ -144,12 +141,13 @@ if [ -z "$JAR_FILE" ]; then
     echo "$BUILD_OUTPUT" | tail -50
     exit 1
 fi
+chown -R "$APP_USER":"$APP_USER" "$INSTALL_DIR/backend/target"
 echo -e "${GREEN}  JAR: $(basename $JAR_FILE)${NC}"
 
 echo -e "${YELLOW}[8/8] 构建前端...${NC}"
 cd "$INSTALL_DIR/frontend"
 set +e
-FRONTEND_INSTALL=$(su - "$APP_USER" -c "export JAVA_HOME=$JAVA_HOME && export PATH=$JAVA_HOME/bin:\$PATH && cd $INSTALL_DIR/frontend && npm install 2>&1")
+FRONTEND_INSTALL=$(npm install 2>&1)
 FRONTEND_INSTALL_EXIT=$?
 set -e
 if [ $FRONTEND_INSTALL_EXIT -ne 0 ]; then
@@ -158,7 +156,7 @@ if [ $FRONTEND_INSTALL_EXIT -ne 0 ]; then
     exit 1
 fi
 set +e
-FRONTEND_BUILD=$(su - "$APP_USER" -c "export JAVA_HOME=$JAVA_HOME && export PATH=$JAVA_HOME/bin:\$PATH && cd $INSTALL_DIR/frontend && npx vite build 2>&1")
+FRONTEND_BUILD=$(npx vite build 2>&1)
 FRONTEND_BUILD_EXIT=$?
 set -e
 if [ $FRONTEND_BUILD_EXIT -ne 0 ]; then
@@ -170,8 +168,7 @@ if [ ! -d "$INSTALL_DIR/frontend/dist" ]; then
     echo -e "${RED}  前端构建失败! dist 目录不存在${NC}"
     echo "$FRONTEND_BUILD" | tail -20
     exit 1
-fi
-echo -e "${GREEN}  前端 dist/ 已生成${NC}"
+fichown -R "$APP_USER":"$APP_USER" "$INSTALL_DIR/frontend"echo -e "${GREEN}  前端 dist/ 已生成${NC}"
 
 #==============================================================
 # 配置 Nginx
