@@ -54,11 +54,36 @@ if ! command -v java &> /dev/null; then
     echo -e "${RED}  JDK ${JAVA_VERSION} 安装失败!${NC}"
     exit 1
 fi
-# 设置 JAVA_HOME (su - 切换用户后不会继承 root 的环境变量)
-JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
+
+# 显式查找 JDK 21 安装路径 (不依赖 update-alternatives, 它可能指向旧版 JDK)
+JAVA_21_HOME=""
+for dir in /usr/lib/jvm/java-21-openjdk-amd64 /usr/lib/jvm/java-21-temurin-amd64 /usr/lib/jvm/temurin-21-jdk-amd64; do
+    if [ -d "$dir" ]; then
+        JAVA_21_HOME="$dir"
+        break
+    fi
+done
+# 如果上面的路径都没找到, 用 find 搜索
+if [ -z "$JAVA_21_HOME" ]; then
+    JAVA_21_HOME=$(find /usr/lib/jvm -maxdepth 1 -type d -name "*21*" 2>/dev/null | head -1)
+fi
+if [ -z "$JAVA_21_HOME" ]; then
+    echo -e "${RED}  无法找到 JDK 21 安装路径! 已安装的 JVM:${NC}"
+    ls -la /usr/lib/jvm/ 2>/dev/null
+    exit 1
+fi
+
+# 设置 JAVA_HOME 并切换 update-alternatives
+JAVA_HOME="$JAVA_21_HOME"
 export JAVA_HOME
+export PATH="$JAVA_HOME/bin:$PATH"
+# 切换系统默认 java/javac 到 JDK 21
+update-alternatives --set java "$JAVA_HOME/bin/java" 2>/dev/null || true
+update-alternatives --set javac "$JAVA_HOME/bin/javac" 2>/dev/null || true
+
 echo -e "${GREEN}  Java: $(java -version 2>&1 | head -1)${NC}"
 echo -e "${GREEN}  JAVA_HOME: ${JAVA_HOME}${NC}"
+echo -e "${GREEN}  javac: $(javac -version 2>&1)${NC}"
 
 echo -e "${YELLOW}[3/8] 安装 Node.js ${NODE_VERSION}...${NC}"
 if ! command -v node &> /dev/null; then
